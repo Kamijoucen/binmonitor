@@ -6,7 +6,6 @@ import (
 
 	"binmonitor/internal/appctx"
 	"binmonitor/internal/component"
-	"binmonitor/internal/infra"
 	"binmonitor/internal/service"
 )
 
@@ -22,13 +21,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	fw, err := infra.NewWatcher()
+	watcherComp, err := component.NewWatcherComponent()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create watcher: %v\n", err)
 		os.Exit(1)
 	}
-
-	watcherComp := component.NewWatcherComponent(fw)
 	stateComp := component.NewStateComponent()
 	appCtx := appctx.NewAppCtx(watcherComp, stateComp)
 

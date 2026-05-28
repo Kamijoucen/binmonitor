@@ -6,13 +6,12 @@ import (
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
-	"binmonitor/internal/infra"
 )
 
 // WatcherComponent manages recursive directory watching and translates
-// infrastructure events into domain FileEvents.
+// fsnotify events into domain FileEvents.
 type WatcherComponent struct {
-	watcher *infra.FSNotifyWatcher
+	watcher *fsnotify.Watcher
 	paths   map[string]struct{}
 	mu      sync.RWMutex
 	events  chan FileEvent
@@ -21,14 +20,18 @@ type WatcherComponent struct {
 }
 
 // NewWatcherComponent creates a WatcherComponent.
-func NewWatcherComponent(fw *infra.FSNotifyWatcher) *WatcherComponent {
+func NewWatcherComponent() (*WatcherComponent, error) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
 	return &WatcherComponent{
-		watcher: fw,
+		watcher: w,
 		paths:   make(map[string]struct{}),
 		events:  make(chan FileEvent, 128),
 		errors:  make(chan error, 64),
 		done:    make(chan struct{}),
-	}
+	}, nil
 }
 
 // AddRecursive walks root and adds all directories to the watcher.
@@ -101,7 +104,7 @@ func (w *WatcherComponent) Run() {
 		select {
 		case <-w.done:
 			return
-		case ev, ok := <-w.watcher.Events():
+		case ev, ok := <-w.watcher.Events:
 			if !ok {
 				return
 			}
@@ -113,7 +116,7 @@ func (w *WatcherComponent) Run() {
 					return
 				}
 			}
-		case err, ok := <-w.watcher.Errors():
+		case err, ok := <-w.watcher.Errors:
 			if !ok {
 				return
 			}
