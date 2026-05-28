@@ -44,27 +44,39 @@ func TranslateEvent(ev fsnotify.Event) *types.FileEvent {
 func ProcessEvent(appCtx *appctx.AppCtx, event types.FileEvent) *EventRecord {
 	state := appCtx.State()
 	if appCtx.Ignore().ShouldIgnore(event.Path) {
-		if (event.Op == types.OpRemove || event.Op == types.OpRename) && appCtx.Watcher().IsWatched(event.Path) {
+		if (event.Op == types.OpRemove || event.Op == types.OpRename) && appCtx.Watcher() != nil && appCtx.Watcher().IsWatched(event.Path) {
 			_ = appCtx.Watcher().RemovePath(event.Path)
 		}
 		return nil
 	}
+	shouldOutput := appCtx.EventFilter().ShouldWatch(event.Op)
 
 	switch event.Op {
 	case types.OpCreate:
 		// 如果创建了新目录，确保对其进行监听并跳过记录。
 		if info, err := os.Stat(event.Path); err == nil && info.IsDir() {
-			_ = appCtx.Watcher().AddPath(event.Path)
+			if appCtx.Watcher() != nil {
+				_ = appCtx.Watcher().AddPath(event.Path)
+			}
+			if appCtx.ReadWatcher() != nil {
+				_ = appCtx.ReadWatcher().AddPath(event.Path)
+			}
 			return nil
 		}
 		newSize := getFileSize(event.Path)
 		state.SetSize(event.Path, newSize)
+		if !shouldOutput {
+			return nil
+		}
 		return &EventRecord{Op: "CREATE", Path: event.Path, OldSize: 0, NewSize: newSize}
 
 	case types.OpWrite:
 		oldSize, _ := state.GetSize(event.Path)
 		newSize := getFileSize(event.Path)
 		state.SetSize(event.Path, newSize)
+		if !shouldOutput {
+			return nil
+		}
 		return &EventRecord{Op: "WRITE", Path: event.Path, OldSize: oldSize, NewSize: newSize}
 
 	case types.OpRemove, types.OpRename:
@@ -76,10 +88,23 @@ func ProcessEvent(appCtx *appctx.AppCtx, event types.FileEvent) *EventRecord {
 		}
 
 		// 如果目录被移除，停止监听它。
-		if appCtx.Watcher().IsWatched(event.Path) {
+		if appCtx.Watcher() != nil && appCtx.Watcher().IsWatched(event.Path) {
 			_ = appCtx.Watcher().RemovePath(event.Path)
 		}
+		if appCtx.ReadWatcher() != nil {
+			_ = appCtx.ReadWatcher().RemovePath(event.Path)
+		}
+		if !shouldOutput {
+			return nil
+		}
 		return &EventRecord{Op: opName, Path: event.Path, OldSize: oldSize, NewSize: 0}
+
+	case types.OpRead:
+		if !shouldOutput {
+			return nil
+		}
+		size := getFileSize(event.Path)
+		return &EventRecord{Op: "READ", Path: event.Path, OldSize: size, NewSize: size}
 
 	case types.OpChmod:
 		// 无大小变化，忽略。

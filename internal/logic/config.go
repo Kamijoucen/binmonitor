@@ -13,6 +13,7 @@ func DefaultConfig() types.Config {
 	return types.Config{
 		Root:   ".",
 		Ignore: []string{},
+		Events: []string{"create", "write", "remove", "rename"},
 	}
 }
 
@@ -32,6 +33,9 @@ func LoadConfig(path string) (types.Config, error) {
 	}
 	if config.Ignore == nil {
 		config.Ignore = []string{}
+	}
+	if config.Events == nil {
+		config.Events = DefaultConfig().Events
 	}
 	return config, nil
 }

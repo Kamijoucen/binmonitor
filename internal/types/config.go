@@ -4,4 +4,5 @@ package types
 type Config struct {
 	Root   string   `json:"root"`
 	Ignore []string `json:"ignore"`
+	Events []string `json:"events"`
 }

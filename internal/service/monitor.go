@@ -9,6 +9,7 @@ import (
 
 	"binmonitor/internal/appctx"
 	"binmonitor/internal/logic"
+	"binmonitor/internal/types"
 )
 
 // MonitorService 是驱动文件监控的活跃逻辑入口。
@@ -35,8 +36,22 @@ func (s *MonitorService) Start() error {
 	}); err != nil {
 		return fmt.Errorf("add recursive watch: %w", err)
 	}
+	if s.appCtx.ReadWatcher() != nil {
+		if err := s.appCtx.ReadWatcher().AddRecursiveWithFilter(s.root, func(path string, info os.FileInfo) bool {
+			return info.IsDir() && s.appCtx.Ignore().ShouldIgnore(path)
+		}); err != nil {
+			return fmt.Errorf("add recursive read watch: %w", err)
+		}
+	}
 
 	go s.appCtx.Watcher().Run()
+	var readEvents <-chan types.FileEvent
+	var readErrors <-chan error
+	if s.appCtx.ReadWatcher() != nil {
+		go s.appCtx.ReadWatcher().Run()
+		readEvents = s.appCtx.ReadWatcher().Events()
+		readErrors = s.appCtx.ReadWatcher().Errors()
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -52,12 +67,24 @@ func (s *MonitorService) Start() error {
 			if record != nil {
 				s.printRecord(record)
 			}
+		case ev := <-readEvents:
+			record := logic.ProcessEvent(s.appCtx, ev)
+			if record != nil {
+				s.printRecord(record)
+			}
 		case err := <-s.appCtx.Watcher().Errors():
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "watcher error: %v\n", err)
 			}
+		case err := <-readErrors:
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "read watcher error: %v\n", err)
+			}
 		case <-sigCh:
 			_ = s.appCtx.Watcher().Close()
+			if s.appCtx.ReadWatcher() != nil {
+				_ = s.appCtx.ReadWatcher().Close()
+			}
 			return nil
 		}
 	}

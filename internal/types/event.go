@@ -8,6 +8,7 @@ const (
 	OpWrite
 	OpRemove
 	OpRename
+	OpRead
 	OpChmod
 )
 

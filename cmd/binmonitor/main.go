@@ -44,7 +44,20 @@ func main() {
 	}
 	stateComp := component.NewStateComponent()
 	ignoreComp := component.NewIgnoreComponent(config.Root, config.Ignore)
-	appCtx := appctx.NewAppCtx(watcherComp, stateComp, ignoreComp)
+	eventFilterComp, err := component.NewEventFilterComponent(config.Events)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create event filter: %v\n", err)
+		os.Exit(1)
+	}
+	var readWatcherComp *component.ReadWatcherComponent
+	if eventFilterComp.ShouldWatch(types.OpRead) {
+		readWatcherComp, err = component.NewReadWatcherComponent()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create read watcher: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	appCtx := appctx.NewAppCtx(watcherComp, stateComp, ignoreComp, eventFilterComp, readWatcherComp)
 
 	monitorSvc := service.NewMonitorService(appCtx, config.Root)
 	if err := monitorSvc.Start(); err != nil {

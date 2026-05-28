@@ -34,7 +34,11 @@ func TestInitStateFromPathSkipsIgnoredFilesAndDirs(t *testing.T) {
 
 	state := component.NewStateComponent()
 	ignore := component.NewIgnoreComponent(root, []string{"tmp/cache.db", "logs"})
-	applicationContext := appctx.NewAppCtx(nil, state, ignore)
+	eventFilter, err := component.NewEventFilterComponent(DefaultConfig().Events)
+	if err != nil {
+		t.Fatalf("NewEventFilterComponent() error = %v", err)
+	}
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil)
 
 	if err := InitStateFromPath(applicationContext, root); err != nil {
 		t.Fatalf("InitStateFromPath() error = %v", err)
@@ -62,12 +66,63 @@ func TestProcessEventSkipsIgnoredPath(t *testing.T) {
 
 	state := component.NewStateComponent()
 	ignore := component.NewIgnoreComponent(root, []string{"logs"})
-	applicationContext := appctx.NewAppCtx(nil, state, ignore)
+	eventFilter, err := component.NewEventFilterComponent(DefaultConfig().Events)
+	if err != nil {
+		t.Fatalf("NewEventFilterComponent() error = %v", err)
+	}
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil)
 
 	if record := ProcessEvent(applicationContext, types.FileEvent{Path: ignoredPath, Op: types.OpWrite}); record != nil {
 		t.Fatalf("ProcessEvent() = %#v, want nil", record)
 	}
 	if _, ok := state.GetSize(ignoredPath); ok {
 		t.Fatal("ignored event updated state")
+	}
+}
+
+func TestProcessEventSkipsDisabledEventOutputButUpdatesState(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "file.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := component.NewStateComponent()
+	ignore := component.NewIgnoreComponent(root, nil)
+	eventFilter, err := component.NewEventFilterComponent([]string{"remove"})
+	if err != nil {
+		t.Fatalf("NewEventFilterComponent() error = %v", err)
+	}
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil)
+
+	if record := ProcessEvent(applicationContext, types.FileEvent{Path: path, Op: types.OpWrite}); record != nil {
+		t.Fatalf("ProcessEvent() = %#v, want nil", record)
+	}
+	if size, ok := state.GetSize(path); !ok || size != 5 {
+		t.Fatalf("state size = %d, ok = %v, want 5 and true", size, ok)
+	}
+}
+
+func TestProcessEventReturnsReadRecordWhenEnabled(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "file.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := component.NewStateComponent()
+	ignore := component.NewIgnoreComponent(root, nil)
+	eventFilter, err := component.NewEventFilterComponent([]string{"read"})
+	if err != nil {
+		t.Fatalf("NewEventFilterComponent() error = %v", err)
+	}
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil)
+
+	record := ProcessEvent(applicationContext, types.FileEvent{Path: path, Op: types.OpRead})
+	if record == nil {
+		t.Fatal("ProcessEvent() = nil, want READ record")
+	}
+	if record.Op != "READ" || record.OldSize != 5 || record.NewSize != 5 {
+		t.Fatalf("record = %#v, want READ with size 5", record)
 	}
 }

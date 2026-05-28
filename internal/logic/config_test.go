@@ -15,11 +15,14 @@ func TestDefaultConfig(t *testing.T) {
 	if len(config.Ignore) != 0 {
 		t.Fatalf("Ignore length = %d, want 0", len(config.Ignore))
 	}
+	if len(config.Events) != 4 {
+		t.Fatalf("Events length = %d, want 4", len(config.Events))
+	}
 }
 
 func TestLoadConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "binmonitor.json")
-	data := []byte(`{"root":"/tmp/watch","ignore":["logs","tmp/cache.db"]}`)
+	data := []byte(`{"root":"/tmp/watch","ignore":["logs","tmp/cache.db"],"events":["create","read"]}`)
 	if err := os.WriteFile(configPath, data, 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -33,6 +36,9 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if len(config.Ignore) != 2 || config.Ignore[0] != "logs" || config.Ignore[1] != "tmp/cache.db" {
 		t.Fatalf("Ignore = %#v, want logs and tmp/cache.db", config.Ignore)
+	}
+	if len(config.Events) != 2 || config.Events[0] != "create" || config.Events[1] != "read" {
+		t.Fatalf("Events = %#v, want create and read", config.Events)
 	}
 }
 
@@ -51,6 +57,9 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	}
 	if len(config.Ignore) != 0 {
 		t.Fatalf("Ignore length = %d, want 0", len(config.Ignore))
+	}
+	if len(config.Events) != 4 {
+		t.Fatalf("Events length = %d, want 4", len(config.Events))
 	}
 }
 
