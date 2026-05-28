@@ -40,6 +40,9 @@ func main() {
 	if config.Log {
 		config.Ignore = append(config.Ignore, "binmonitor.log")
 	}
+	if config.DedupLog {
+		config.Ignore = append(config.Ignore, "binmonitor.dedup.log")
+	}
 
 	watcherComp, err := component.NewWatcherComponent()
 	if err != nil {
@@ -70,7 +73,11 @@ func main() {
 		}
 		defer logWriterComp.Close()
 	}
-	appCtx := appctx.NewAppCtx(watcherComp, stateComp, ignoreComp, eventFilterComp, readWatcherComp, logWriterComp)
+	var dedupStatsComp *component.DedupStatsComponent
+	if config.DedupLog {
+		dedupStatsComp = component.NewDedupStatsComponent()
+	}
+	appCtx := appctx.NewAppCtx(watcherComp, stateComp, ignoreComp, eventFilterComp, readWatcherComp, logWriterComp, dedupStatsComp)
 
 	monitorSvc := service.NewMonitorService(appCtx, config.Root)
 	if err := monitorSvc.Start(); err != nil {

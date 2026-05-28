@@ -10,10 +10,11 @@ type AppCtx struct {
 	eventFilter *component.EventFilterComponent
 	readWatcher *component.ReadWatcherComponent
 	logWriter   *component.LogWriterComponent
+	dedupStats  *component.DedupStatsComponent
 }
 
 // NewAppCtx 使用给定的组件创建一个 AppCtx。
-func NewAppCtx(watcher *component.WatcherComponent, state *component.StateComponent, ignore *component.IgnoreComponent, eventFilter *component.EventFilterComponent, readWatcher *component.ReadWatcherComponent, logWriter *component.LogWriterComponent) *AppCtx {
+func NewAppCtx(watcher *component.WatcherComponent, state *component.StateComponent, ignore *component.IgnoreComponent, eventFilter *component.EventFilterComponent, readWatcher *component.ReadWatcherComponent, logWriter *component.LogWriterComponent, dedupStats *component.DedupStatsComponent) *AppCtx {
 	return &AppCtx{
 		watcher:     watcher,
 		state:       state,
@@ -21,6 +22,7 @@ func NewAppCtx(watcher *component.WatcherComponent, state *component.StateCompon
 		eventFilter: eventFilter,
 		readWatcher: readWatcher,
 		logWriter:   logWriter,
+		dedupStats:  dedupStats,
 	}
 }
 
@@ -52,4 +54,9 @@ func (a *AppCtx) ReadWatcher() *component.ReadWatcherComponent {
 // LogWriter 返回 LogWriterComponent。
 func (a *AppCtx) LogWriter() *component.LogWriterComponent {
 	return a.logWriter
+}
+
+// DedupStats 返回 DedupStatsComponent。
+func (a *AppCtx) DedupStats() *component.DedupStatsComponent {
+	return a.dedupStats
 }

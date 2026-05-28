@@ -54,7 +54,9 @@ GOOS=linux GOARCH=arm64 go build -o binmonitor-arm64 ./cmd/binmonitor
 		"write",
 		"remove",
 		"rename"
-	]
+	],
+	"log": false,
+	"dedupLog": false
 }
 ```
 
@@ -63,6 +65,8 @@ GOOS=linux GOARCH=arm64 go build -o binmonitor-arm64 ./cmd/binmonitor
 - `root`：监控目录，可以是相对路径或绝对路径。
 - `ignore`：忽略路径列表，每一项都相对于 `root`。忽略项使用精确路径匹配；如果忽略项是目录，会忽略该目录及其所有子路径。
 - `events`：需要输出的事件类型。支持 `create`、`write`、`remove`、`rename`、`read`，也支持 `modify` 作为 `write` 的别名、`delete` 作为 `remove` 和 `rename` 的组合别名。
+- `log`：是否开启文件日志输出。设为 `true` 时，监控事件和错误信息会同步追加写入当前工作目录下的 `binmonitor.log` 文件中。日志文件以追加模式打开，程序重启不会覆盖历史日志。启用日志后，`binmonitor.log` 会自动加入忽略列表，避免自监控递归。
+- `dedupLog`：是否开启去重统计日志。设为 `true` 时，每个文件的每种事件类型在当前进程生命周期内仅记录一次，并实时覆盖写入当前工作目录下的 `binmonitor.dedup.log` 文件中。统计按事件类型分组，组内按首次发生顺序排列。启用后，`binmonitor.dedup.log` 会自动加入忽略列表。
 
 例如上面的配置会监控当前目录，同时忽略 `logs` 目录下的所有事件，以及 `tmp/cache.db` 文件。
 
@@ -92,3 +96,24 @@ GOOS=linux GOARCH=arm64 go build -o binmonitor-arm64 ./cmd/binmonitor
 2026-05-28 12:21:56 REMOVE /tmp/test/file2.txt 12B → 0B (-12B)
 2026-05-28 12:21:57 READ /tmp/test/file3.txt 8B → 8B (0B)
 ```
+
+## 去重统计日志
+
+当 `dedupLog` 设为 `true` 时，除控制台输出外，程序还会生成 `binmonitor.dedup.log`，按事件类型分组记录每个文件首次触发的事件：
+
+```
+[CREATE]
+/tmp/test/file1.txt
+/tmp/test/file2.txt
+
+[WRITE]
+/tmp/test/file1.txt
+
+[READ]
+/tmp/test/file3.txt
+
+[REMOVE]
+/tmp/test/file2.txt
+```
+
+同一文件的同一事件类型仅记录一次，新事件追加到对应组末尾，每次有新记录时覆盖写入文件。

@@ -102,4 +102,10 @@ func (s *MonitorService) printRecord(record *logic.EventRecord) {
 		logic.HumanReadableSize(diff),
 	)
 	_ = logic.LogEvent(s.appCtx, record)
+
+	if s.appCtx.DedupStats() != nil {
+		if s.appCtx.DedupStats().Add(record.Op, record.Path) {
+			_ = os.WriteFile("binmonitor.dedup.log", []byte(s.appCtx.DedupStats().Format()), 0644)
+		}
+	}
 }

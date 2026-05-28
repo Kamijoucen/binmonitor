@@ -11,10 +11,11 @@ import (
 // DefaultConfig 返回默认启动配置。
 func DefaultConfig() types.Config {
 	return types.Config{
-		Root:   ".",
-		Ignore: []string{},
-		Events: []string{"create", "write", "remove", "rename"},
-		Log:    false,
+		Root:     ".",
+		Ignore:   []string{},
+		Events:   []string{"create", "write", "remove", "rename"},
+		Log:      false,
+		DedupLog: false,
 	}
 }
 
