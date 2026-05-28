@@ -14,6 +14,7 @@ func DefaultConfig() types.Config {
 		Root:   ".",
 		Ignore: []string{},
 		Events: []string{"create", "write", "remove", "rename"},
+		Log:    false,
 	}
 }
 

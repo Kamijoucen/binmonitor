@@ -75,10 +75,12 @@ func (s *MonitorService) Start() error {
 		case err := <-s.appCtx.Watcher().Errors():
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "watcher error: %v\n", err)
+				_ = logic.LogError(s.appCtx, "watcher error: %v", err)
 			}
 		case err := <-readErrors:
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "read watcher error: %v\n", err)
+				_ = logic.LogError(s.appCtx, "read watcher error: %v", err)
 			}
 		case <-sigCh:
 			_ = s.appCtx.Watcher().Close()
@@ -99,4 +101,5 @@ func (s *MonitorService) printRecord(record *logic.EventRecord) {
 		logic.HumanReadableSize(record.NewSize),
 		logic.HumanReadableSize(diff),
 	)
+	_ = logic.LogEvent(s.appCtx, record)
 }

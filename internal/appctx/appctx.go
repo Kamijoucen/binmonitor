@@ -9,16 +9,18 @@ type AppCtx struct {
 	ignore      *component.IgnoreComponent
 	eventFilter *component.EventFilterComponent
 	readWatcher *component.ReadWatcherComponent
+	logWriter   *component.LogWriterComponent
 }
 
 // NewAppCtx 使用给定的组件创建一个 AppCtx。
-func NewAppCtx(watcher *component.WatcherComponent, state *component.StateComponent, ignore *component.IgnoreComponent, eventFilter *component.EventFilterComponent, readWatcher *component.ReadWatcherComponent) *AppCtx {
+func NewAppCtx(watcher *component.WatcherComponent, state *component.StateComponent, ignore *component.IgnoreComponent, eventFilter *component.EventFilterComponent, readWatcher *component.ReadWatcherComponent, logWriter *component.LogWriterComponent) *AppCtx {
 	return &AppCtx{
 		watcher:     watcher,
 		state:       state,
 		ignore:      ignore,
 		eventFilter: eventFilter,
 		readWatcher: readWatcher,
+		logWriter:   logWriter,
 	}
 }
 
@@ -45,4 +47,9 @@ func (a *AppCtx) EventFilter() *component.EventFilterComponent {
 // ReadWatcher 返回 ReadWatcherComponent。
 func (a *AppCtx) ReadWatcher() *component.ReadWatcherComponent {
 	return a.readWatcher
+}
+
+// LogWriter 返回 LogWriterComponent。
+func (a *AppCtx) LogWriter() *component.LogWriterComponent {
+	return a.logWriter
 }

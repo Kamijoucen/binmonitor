@@ -37,6 +37,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	if config.Log {
+		config.Ignore = append(config.Ignore, "binmonitor.log")
+	}
+
 	watcherComp, err := component.NewWatcherComponent()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create watcher: %v\n", err)
@@ -57,7 +61,16 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	appCtx := appctx.NewAppCtx(watcherComp, stateComp, ignoreComp, eventFilterComp, readWatcherComp)
+	var logWriterComp *component.LogWriterComponent
+	if config.Log {
+		logWriterComp, err = component.NewLogWriterComponent("binmonitor.log")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create log writer: %v\n", err)
+			os.Exit(1)
+		}
+		defer logWriterComp.Close()
+	}
+	appCtx := appctx.NewAppCtx(watcherComp, stateComp, ignoreComp, eventFilterComp, readWatcherComp, logWriterComp)
 
 	monitorSvc := service.NewMonitorService(appCtx, config.Root)
 	if err := monitorSvc.Start(); err != nil {

@@ -38,7 +38,7 @@ func TestInitStateFromPathSkipsIgnoredFilesAndDirs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventFilterComponent() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil)
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil)
 
 	if err := InitStateFromPath(applicationContext, root); err != nil {
 		t.Fatalf("InitStateFromPath() error = %v", err)
@@ -70,7 +70,7 @@ func TestProcessEventSkipsIgnoredPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventFilterComponent() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil)
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil)
 
 	if record := ProcessEvent(applicationContext, types.FileEvent{Path: ignoredPath, Op: types.OpWrite}); record != nil {
 		t.Fatalf("ProcessEvent() = %#v, want nil", record)
@@ -93,7 +93,7 @@ func TestProcessEventSkipsDisabledEventOutputButUpdatesState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventFilterComponent() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil)
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil)
 
 	if record := ProcessEvent(applicationContext, types.FileEvent{Path: path, Op: types.OpWrite}); record != nil {
 		t.Fatalf("ProcessEvent() = %#v, want nil", record)
@@ -116,7 +116,7 @@ func TestProcessEventReturnsReadRecordWhenEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventFilterComponent() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil)
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil)
 
 	record := ProcessEvent(applicationContext, types.FileEvent{Path: path, Op: types.OpRead})
 	if record == nil {
