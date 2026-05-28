@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug binmonitor (default cwd)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/binmonitor",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Debug binmonitor (with args)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/binmonitor",
+      "args": [
+        "${input:monitorPath}"
+      ],
+      "cwd": "${workspaceFolder}"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "monitorPath",
+      "type": "promptString",
+      "description": "Directory path to monitor",
+      "default": "."
+    }
+  ]
+}
