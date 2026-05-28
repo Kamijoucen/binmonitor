@@ -8,18 +8,17 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// WatcherComponent manages recursive directory watching and translates
-// fsnotify events into domain FileEvents.
+// WatcherComponent 管理递归目录监听并暴露原始 fsnotify 事件。
 type WatcherComponent struct {
 	watcher *fsnotify.Watcher
 	paths   map[string]struct{}
 	mu      sync.RWMutex
-	events  chan FileEvent
+	events  chan fsnotify.Event
 	errors  chan error
 	done    chan struct{}
 }
 
-// NewWatcherComponent creates a WatcherComponent.
+// NewWatcherComponent 创建一个 WatcherComponent。
 func NewWatcherComponent() (*WatcherComponent, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -28,16 +27,27 @@ func NewWatcherComponent() (*WatcherComponent, error) {
 	return &WatcherComponent{
 		watcher: w,
 		paths:   make(map[string]struct{}),
-		events:  make(chan FileEvent, 128),
+		events:  make(chan fsnotify.Event, 128),
 		errors:  make(chan error, 64),
 		done:    make(chan struct{}),
 	}, nil
 }
 
-// AddRecursive walks root and adds all directories to the watcher.
+// AddRecursive 遍历 root 并将所有目录加入监听。
 func (w *WatcherComponent) AddRecursive(root string) error {
+	return w.AddRecursiveWithFilter(root, nil)
+}
+
+// AddRecursiveWithFilter 遍历 root，并将未被过滤的目录加入监听。
+func (w *WatcherComponent) AddRecursiveWithFilter(root string, shouldSkip func(path string, info os.FileInfo) bool) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			return nil
+		}
+		if shouldSkip != nil && shouldSkip(path, info) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if info.IsDir() {
@@ -51,7 +61,7 @@ func (w *WatcherComponent) AddRecursive(root string) error {
 	})
 }
 
-// AddPath adds a single directory path.
+// AddPath 添加单个目录路径。
 func (w *WatcherComponent) AddPath(path string) error {
 	if err := w.watcher.Add(path); err != nil {
 		return err
@@ -62,7 +72,7 @@ func (w *WatcherComponent) AddPath(path string) error {
 	return nil
 }
 
-// RemovePath removes a directory path.
+// RemovePath 移除一个目录路径。
 func (w *WatcherComponent) RemovePath(path string) error {
 	if err := w.watcher.Remove(path); err != nil {
 		return err
@@ -73,17 +83,17 @@ func (w *WatcherComponent) RemovePath(path string) error {
 	return nil
 }
 
-// Events returns the domain event channel.
-func (w *WatcherComponent) Events() <-chan FileEvent {
+// Events 返回原始 fsnotify 事件通道。
+func (w *WatcherComponent) Events() <-chan fsnotify.Event {
 	return w.events
 }
 
-// Errors returns the error channel.
+// Errors 返回错误通道。
 func (w *WatcherComponent) Errors() <-chan error {
 	return w.errors
 }
 
-// IsWatched reports whether a directory is being watched.
+// IsWatched 报告某个目录是否正在被监听。
 func (w *WatcherComponent) IsWatched(path string) bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -91,14 +101,13 @@ func (w *WatcherComponent) IsWatched(path string) bool {
 	return ok
 }
 
-// Close stops the watcher and closes channels.
+// Close 停止监听并关闭通道。
 func (w *WatcherComponent) Close() error {
 	close(w.done)
 	return w.watcher.Close()
 }
 
-// Run starts translating infrastructure events into FileEvents.
-// It blocks until the watcher is closed.
+// Run 开始转发 fsnotify 事件，会阻塞直到监听器被关闭。
 func (w *WatcherComponent) Run() {
 	for {
 		select {
@@ -108,13 +117,10 @@ func (w *WatcherComponent) Run() {
 			if !ok {
 				return
 			}
-			fe := w.translate(ev)
-			if fe != nil {
-				select {
-				case w.events <- *fe:
-				case <-w.done:
-					return
-				}
+			select {
+			case w.events <- ev:
+			case <-w.done:
+				return
 			}
 		case err, ok := <-w.watcher.Errors:
 			if !ok {
@@ -127,23 +133,4 @@ func (w *WatcherComponent) Run() {
 			}
 		}
 	}
-}
-
-func (w *WatcherComponent) translate(ev fsnotify.Event) *FileEvent {
-	var op FileOp
-	switch {
-	case ev.Op&fsnotify.Create != 0:
-		op = OpCreate
-	case ev.Op&fsnotify.Write != 0:
-		op = OpWrite
-	case ev.Op&fsnotify.Remove != 0:
-		op = OpRemove
-	case ev.Op&fsnotify.Rename != 0:
-		op = OpRename
-	case ev.Op&fsnotify.Chmod != 0:
-		op = OpChmod
-	default:
-		return nil
-	}
-	return &FileEvent{Path: ev.Name, Op: op}
 }

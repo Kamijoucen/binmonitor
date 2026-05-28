@@ -1,42 +1,21 @@
 package component
 
-import (
-	"os"
-	"path/filepath"
-	"sync"
-)
+import "sync"
 
-// StateComponent tracks file path to size mapping.
+// StateComponent 跟踪文件路径到大小的映射。
 type StateComponent struct {
-	mu     sync.RWMutex
-	sizes  map[string]int64
+	mu    sync.RWMutex
+	sizes map[string]int64
 }
 
-// NewStateComponent creates a new StateComponent.
+// NewStateComponent 创建一个新的 StateComponent。
 func NewStateComponent() *StateComponent {
 	return &StateComponent{
 		sizes: make(map[string]int64),
 	}
 }
 
-// InitFromPath recursively scans root and records all file sizes.
-func (s *StateComponent) InitFromPath(root string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			// Permission errors or other walk errors: skip but continue
-			return nil
-		}
-		if !info.IsDir() {
-			s.sizes[path] = info.Size()
-		}
-		return nil
-	})
-}
-
-// GetSize returns the recorded size and whether the path exists.
+// GetSize 返回已记录的大小以及该路径是否存在。
 func (s *StateComponent) GetSize(path string) (int64, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -44,14 +23,14 @@ func (s *StateComponent) GetSize(path string) (int64, bool) {
 	return size, ok
 }
 
-// SetSize records or updates a file's size.
+// SetSize 记录或更新文件大小。
 func (s *StateComponent) SetSize(path string, size int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sizes[path] = size
 }
 
-// Remove deletes a path from tracking.
+// Remove 从跟踪中删除指定路径。
 func (s *StateComponent) Remove(path string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

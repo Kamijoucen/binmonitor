@@ -3,50 +3,90 @@ package logic
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"binmonitor/internal/appctx"
-	"binmonitor/internal/component"
+	"binmonitor/internal/types"
+
+	"github.com/fsnotify/fsnotify"
 )
 
-// ProcessEvent handles a file event, computes size changes, and prints a record.
-func ProcessEvent(appCtx *appctx.AppCtx, event component.FileEvent) {
+// EventRecord 承载处理文件事件的结果。
+type EventRecord struct {
+	Op      string
+	Path    string
+	OldSize int64
+	NewSize int64
+}
+
+// TranslateEvent 将原始 fsnotify 事件转换为领域 FileEvent。
+func TranslateEvent(ev fsnotify.Event) *types.FileEvent {
+	var op types.FileOp
+	switch {
+	case ev.Op&fsnotify.Create != 0:
+		op = types.OpCreate
+	case ev.Op&fsnotify.Write != 0:
+		op = types.OpWrite
+	case ev.Op&fsnotify.Remove != 0:
+		op = types.OpRemove
+	case ev.Op&fsnotify.Rename != 0:
+		op = types.OpRename
+	case ev.Op&fsnotify.Chmod != 0:
+		op = types.OpChmod
+	default:
+		return nil
+	}
+	return &types.FileEvent{Path: ev.Name, Op: op}
+}
+
+// ProcessEvent 处理文件事件并返回用于输出的 EventRecord。
+// 可能通过 appCtx 产生副作用（状态与监听器更新）。
+// 返回 nil 表示无需打印记录。
+func ProcessEvent(appCtx *appctx.AppCtx, event types.FileEvent) *EventRecord {
 	state := appCtx.State()
+	if appCtx.Ignore().ShouldIgnore(event.Path) {
+		if (event.Op == types.OpRemove || event.Op == types.OpRename) && appCtx.Watcher().IsWatched(event.Path) {
+			_ = appCtx.Watcher().RemovePath(event.Path)
+		}
+		return nil
+	}
 
 	switch event.Op {
-	case component.OpCreate:
-		// If a new directory is created, ensure it is watched and skip recording.
+	case types.OpCreate:
+		// 如果创建了新目录，确保对其进行监听并跳过记录。
 		if info, err := os.Stat(event.Path); err == nil && info.IsDir() {
 			_ = appCtx.Watcher().AddPath(event.Path)
-			return
+			return nil
 		}
 		newSize := getFileSize(event.Path)
 		state.SetSize(event.Path, newSize)
-		printRecord("CREATE", event.Path, 0, newSize)
+		return &EventRecord{Op: "CREATE", Path: event.Path, OldSize: 0, NewSize: newSize}
 
-	case component.OpWrite:
+	case types.OpWrite:
 		oldSize, _ := state.GetSize(event.Path)
 		newSize := getFileSize(event.Path)
 		state.SetSize(event.Path, newSize)
-		printRecord("WRITE", event.Path, oldSize, newSize)
+		return &EventRecord{Op: "WRITE", Path: event.Path, OldSize: oldSize, NewSize: newSize}
 
-	case component.OpRemove, component.OpRename:
+	case types.OpRemove, types.OpRename:
 		oldSize, _ := state.GetSize(event.Path)
 		state.Remove(event.Path)
 		opName := "REMOVE"
-		if event.Op == component.OpRename {
+		if event.Op == types.OpRename {
 			opName = "RENAME"
 		}
-		printRecord(opName, event.Path, oldSize, 0)
 
-		// If a directory is removed, stop watching it.
+		// 如果目录被移除，停止监听它。
 		if appCtx.Watcher().IsWatched(event.Path) {
 			_ = appCtx.Watcher().RemovePath(event.Path)
 		}
+		return &EventRecord{Op: opName, Path: event.Path, OldSize: oldSize, NewSize: 0}
 
-	case component.OpChmod:
-		// No size change; ignore.
+	case types.OpChmod:
+		// 无大小变化，忽略。
+		return nil
 	}
+
+	return nil
 }
 
 func getFileSize(path string) int64 {
@@ -60,18 +100,7 @@ func getFileSize(path string) int64 {
 	return info.Size()
 }
 
-func printRecord(op, path string, oldSize, newSize int64) {
-	diff := newSize - oldSize
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	fmt.Printf("%s %s %s %s → %s (%+s)\n",
-		timestamp, op, path,
-		HumanReadableSize(oldSize),
-		HumanReadableSize(newSize),
-		HumanReadableSize(diff),
-	)
-}
-
-// HumanReadableSize converts bytes to a human-readable string.
+// HumanReadableSize 将字节数转换为人类可读的字符串。
 func HumanReadableSize(bytes int64) string {
 	const (
 		B  = 1
