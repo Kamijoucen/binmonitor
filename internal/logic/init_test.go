@@ -38,7 +38,7 @@ func TestInitStateFromPathSkipsIgnoredFilesAndDirs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventFilterComponent() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil)
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil, nil)
 
 	if err := InitStateFromPath(applicationContext, root); err != nil {
 		t.Fatalf("InitStateFromPath() error = %v", err)
@@ -70,7 +70,7 @@ func TestProcessEventSkipsIgnoredPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventFilterComponent() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil)
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil, nil)
 
 	if record := ProcessEvent(applicationContext, types.FileEvent{Path: ignoredPath, Op: types.OpWrite}); record != nil {
 		t.Fatalf("ProcessEvent() = %#v, want nil", record)
@@ -93,7 +93,7 @@ func TestProcessEventSkipsDisabledEventOutputButUpdatesState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventFilterComponent() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil)
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil, nil)
 
 	if record := ProcessEvent(applicationContext, types.FileEvent{Path: path, Op: types.OpWrite}); record != nil {
 		t.Fatalf("ProcessEvent() = %#v, want nil", record)
@@ -116,7 +116,7 @@ func TestProcessEventReturnsReadRecordWhenEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventFilterComponent() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil)
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil, nil)
 
 	record := ProcessEvent(applicationContext, types.FileEvent{Path: path, Op: types.OpRead})
 	if record == nil {
@@ -124,5 +124,41 @@ func TestProcessEventReturnsReadRecordWhenEnabled(t *testing.T) {
 	}
 	if record.Op != "READ" || record.OldSize != 5 || record.NewSize != 5 {
 		t.Fatalf("record = %#v, want READ with size 5", record)
+	}
+}
+
+func TestProcessEventReturnsOpenRecordWithProcessMetadata(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "file.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := component.NewStateComponent()
+	ignore := component.NewIgnoreComponent(root, []string{"file.txt"})
+	eventFilter, err := component.NewEventFilterComponent([]string{"open"})
+	if err != nil {
+		t.Fatalf("NewEventFilterComponent() error = %v", err)
+	}
+	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil, nil)
+
+	record := ProcessEvent(applicationContext, types.FileEvent{Path: path, Op: types.OpOpen, PID: 123, FD: 7, ProcessName: "worker"})
+	if record == nil {
+		t.Fatal("ProcessEvent() = nil, want OPEN record")
+	}
+	if record.Op != "OPEN" || record.PID != 123 || record.FD != 7 || record.ProcessName != "worker" || !record.HasProcessMeta {
+		t.Fatalf("record = %#v, want process metadata", record)
+	}
+	if record.NewSize != 5 || record.OldSize != 5 {
+		t.Fatalf("record sizes = %d/%d, want 5/5", record.OldSize, record.NewSize)
+	}
+
+	line := FormatEventRecord(record, "2026-06-01 12:00:00")
+	wantLine := "2026-06-01 12:00:00 OPEN pid=123 fd=7 name=worker " + path + " 5B"
+	if line != wantLine {
+		t.Fatalf("FormatEventRecord() = %q, want %q", line, wantLine)
+	}
+	if got := DedupRecordPath(record); got != "pid=123 name=worker "+path {
+		t.Fatalf("DedupRecordPath() = %q", got)
 	}
 }

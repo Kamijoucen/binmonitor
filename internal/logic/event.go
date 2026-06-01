@@ -12,10 +12,14 @@ import (
 
 // EventRecord 承载处理文件事件的结果。
 type EventRecord struct {
-	Op      string
-	Path    string
-	OldSize int64
-	NewSize int64
+	Op             string
+	Path           string
+	OldSize        int64
+	NewSize        int64
+	PID            int
+	FD             int
+	ProcessName    string
+	HasProcessMeta bool
 }
 
 // TranslateEvent 将原始 fsnotify 事件转换为领域 FileEvent。
@@ -42,6 +46,10 @@ func TranslateEvent(ev fsnotify.Event) *types.FileEvent {
 // 可能通过 appCtx 产生副作用（状态与监听器更新）。
 // 返回 nil 表示无需打印记录。
 func ProcessEvent(appCtx *appctx.AppCtx, event types.FileEvent) *EventRecord {
+	if event.Op == types.OpOpen || event.Op == types.OpClose {
+		return processProcessEvent(appCtx, event)
+	}
+
 	state := appCtx.State()
 	if appCtx.Ignore().ShouldIgnore(event.Path) {
 		if (event.Op == types.OpRemove || event.Op == types.OpRename) && appCtx.Watcher() != nil && appCtx.Watcher().IsWatched(event.Path) {
@@ -112,6 +120,27 @@ func ProcessEvent(appCtx *appctx.AppCtx, event types.FileEvent) *EventRecord {
 	}
 
 	return nil
+}
+
+func processProcessEvent(appCtx *appctx.AppCtx, event types.FileEvent) *EventRecord {
+	if !appCtx.EventFilter().ShouldWatch(event.Op) {
+		return nil
+	}
+	opName := "OPEN"
+	if event.Op == types.OpClose {
+		opName = "CLOSE"
+	}
+	size := getFileSize(event.Path)
+	return &EventRecord{
+		Op:             opName,
+		Path:           event.Path,
+		OldSize:        size,
+		NewSize:        size,
+		PID:            event.PID,
+		FD:             event.FD,
+		ProcessName:    event.ProcessName,
+		HasProcessMeta: true,
+	}
 }
 
 func getFileSize(path string) int64 {

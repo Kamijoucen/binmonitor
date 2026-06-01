@@ -49,6 +49,10 @@ func (filter *EventFilterComponent) add(event string) error {
 		filter.watching[types.OpRename] = struct{}{}
 	case "read":
 		filter.watching[types.OpRead] = struct{}{}
+	case "open", "process_open":
+		filter.watching[types.OpOpen] = struct{}{}
+	case "close", "process_close":
+		filter.watching[types.OpClose] = struct{}{}
 	case "":
 		return nil
 	default:

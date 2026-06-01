@@ -7,8 +7,6 @@ import (
 )
 
 // DedupStatsComponent 记录去重的事件统计。
-// 每个文件的每种事件类型在当前进程生命周期内仅记录一次；当同一事件再次发生时，
-// 该记录会像冒泡一样移动到对应事件组的最末尾，保证中间其他文件的相对时序不变。
 type DedupStatsComponent struct {
 	mu     sync.Mutex
 	groups map[string]*list.List
@@ -52,7 +50,7 @@ func (d *DedupStatsComponent) Format() string {
 
 	var b strings.Builder
 	firstGroup := true
-	for _, op := range []string{"CREATE", "WRITE", "REMOVE", "RENAME", "READ", "CHMOD"} {
+	for _, op := range []string{"CREATE", "WRITE", "REMOVE", "RENAME", "READ", "OPEN", "CLOSE", "CHMOD"} {
 		grp, ok := d.groups[op]
 		if !ok || grp.Len() == 0 {
 			continue

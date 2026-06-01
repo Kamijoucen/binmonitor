@@ -16,18 +16,27 @@ import (
 type MonitorService struct {
 	appCtx *appctx.AppCtx
 	root   string
+	mode   string
 }
 
 // NewMonitorService 创建一个 MonitorService。
-func NewMonitorService(appCtx *appctx.AppCtx, root string) *MonitorService {
+func NewMonitorService(appCtx *appctx.AppCtx, config types.Config) *MonitorService {
 	return &MonitorService{
 		appCtx: appCtx,
-		root:   root,
+		root:   config.Root,
+		mode:   config.Mode,
 	}
 }
 
 // Start 初始化状态，启动监听器，并阻塞直到被中断。
 func (s *MonitorService) Start() error {
+	if s.mode == types.ModeProcess {
+		return s.startProcess()
+	}
+	return s.startDirectory()
+}
+
+func (s *MonitorService) startDirectory() error {
 	if err := logic.InitStateFromPath(s.appCtx, s.root); err != nil {
 		return fmt.Errorf("init state: %w", err)
 	}
@@ -92,19 +101,52 @@ func (s *MonitorService) Start() error {
 	}
 }
 
+func (s *MonitorService) startProcess() error {
+	if s.appCtx.ProcessWatcher() == nil {
+		return fmt.Errorf("process watcher is not configured")
+	}
+
+	go s.appCtx.ProcessWatcher().Run()
+	processEvents := s.appCtx.ProcessWatcher().Events()
+	processErrors := s.appCtx.ProcessWatcher().Errors()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	for processEvents != nil || processErrors != nil {
+		select {
+		case ev, ok := <-processEvents:
+			if !ok {
+				processEvents = nil
+				continue
+			}
+			record := logic.ProcessEvent(s.appCtx, ev)
+			if record != nil {
+				s.printRecord(record)
+			}
+		case err, ok := <-processErrors:
+			if !ok {
+				processErrors = nil
+				continue
+			}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "process watcher error: %v\n", err)
+				_ = logic.LogError(s.appCtx, "process watcher error: %v", err)
+			}
+		case <-sigCh:
+			_ = s.appCtx.ProcessWatcher().Close()
+			return nil
+		}
+	}
+	return nil
+}
+
 func (s *MonitorService) printRecord(record *logic.EventRecord) {
-	diff := record.NewSize - record.OldSize
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	fmt.Printf("%s %s %s %s → %s (%s)\n",
-		timestamp, record.Op, record.Path,
-		logic.HumanReadableSize(record.OldSize),
-		logic.HumanReadableSize(record.NewSize),
-		logic.HumanReadableSize(diff),
-	)
+	fmt.Println(logic.FormatEventRecord(record, time.Now().Format("2006-01-02 15:04:05")))
 	_ = logic.LogEvent(s.appCtx, record)
 
 	if s.appCtx.DedupStats() != nil {
-		if s.appCtx.DedupStats().Add(record.Op, record.Path) {
+		if s.appCtx.DedupStats().Add(record.Op, logic.DedupRecordPath(record)) {
 			_ = os.WriteFile("binmonitor.dedup.log", []byte(s.appCtx.DedupStats().Format()), 0644)
 		}
 	}

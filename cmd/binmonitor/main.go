@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"binmonitor/internal/appctx"
 	"binmonitor/internal/component"
@@ -31,12 +33,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	info, err := os.Stat(config.Root)
-	if err != nil || !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "invalid directory: %s\n", config.Root)
-		os.Exit(1)
-	}
-
 	if config.Log {
 		config.Ignore = append(config.Ignore, "binmonitor.log")
 	}
@@ -44,10 +40,18 @@ func main() {
 		config.Ignore = append(config.Ignore, "binmonitor.dedup.log")
 	}
 
-	watcherComp, err := component.NewWatcherComponent()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "create watcher: %v\n", err)
-		os.Exit(1)
+	var watcherComp *component.WatcherComponent
+	if config.Mode == types.ModeDirectory {
+		info, err := os.Stat(config.Root)
+		if err != nil || !info.IsDir() {
+			fmt.Fprintf(os.Stderr, "invalid directory: %s\n", config.Root)
+			os.Exit(1)
+		}
+		watcherComp, err = component.NewWatcherComponent()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create watcher: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	stateComp := component.NewStateComponent()
 	ignoreComp := component.NewIgnoreComponent(config.Root, config.Ignore)
@@ -57,10 +61,18 @@ func main() {
 		os.Exit(1)
 	}
 	var readWatcherComp *component.ReadWatcherComponent
-	if eventFilterComp.ShouldWatch(types.OpRead) {
+	if config.Mode == types.ModeDirectory && eventFilterComp.ShouldWatch(types.OpRead) {
 		readWatcherComp, err = component.NewReadWatcherComponent()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "create read watcher: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	var processWatcherComp *component.MultiProcessWatcherComponent
+	if config.Mode == types.ModeProcess {
+		processWatcherComp, err = component.NewMultiProcessWatcherComponent(config.Processes)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create process watcher: %v\n", err)
 			os.Exit(1)
 		}
 	}
@@ -77,9 +89,9 @@ func main() {
 	if config.DedupLog {
 		dedupStatsComp = component.NewDedupStatsComponent()
 	}
-	appCtx := appctx.NewAppCtx(watcherComp, stateComp, ignoreComp, eventFilterComp, readWatcherComp, logWriterComp, dedupStatsComp)
+	appCtx := appctx.NewAppCtx(watcherComp, stateComp, ignoreComp, eventFilterComp, readWatcherComp, processWatcherComp, logWriterComp, dedupStatsComp)
 
-	monitorSvc := service.NewMonitorService(appCtx, config.Root)
+	monitorSvc := service.NewMonitorService(appCtx, config)
 	if err := monitorSvc.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "monitor service: %v\n", err)
 		os.Exit(1)
@@ -90,6 +102,8 @@ func loadConfig(args []string) (types.Config, error) {
 	flagSet := flag.NewFlagSet("binmonitor", flag.ContinueOnError)
 	flagSet.SetOutput(os.Stderr)
 	configPath := flagSet.String("config", defaultConfigPath, "config file path")
+	pidValue := flagSet.String("pid", "", "comma-separated process IDs to monitor")
+	pollMS := flagSet.Int("poll-ms", 0, "process fd polling interval in milliseconds")
 	if err := flagSet.Parse(args); err != nil {
 		return types.Config{}, err
 	}
@@ -115,10 +129,57 @@ func loadConfig(args []string) (types.Config, error) {
 		return types.Config{}, fmt.Errorf("unexpected arguments: %v", remainingArgs[1:])
 	}
 	if len(remainingArgs) == 1 {
+		if strings.TrimSpace(*pidValue) != "" {
+			return types.Config{}, fmt.Errorf("unexpected monitor directory with -pid: %s", remainingArgs[0])
+		}
 		if configPathSet {
 			return types.Config{}, fmt.Errorf("unexpected monitor directory with -config: %s", remainingArgs[0])
 		}
 		config.Root = remainingArgs[0]
 	}
+	if *pollMS < 0 {
+		return types.Config{}, fmt.Errorf("-poll-ms must be greater than or equal to 0")
+	}
+	if strings.TrimSpace(*pidValue) != "" {
+		pids, err := parsePIDs(*pidValue)
+		if err != nil {
+			return types.Config{}, err
+		}
+		config.Mode = types.ModeProcess
+		config.Process = nil
+		config.ProcessPollIntervalMs = *pollMS
+		config.Processes = make([]types.ProcessConfig, 0, len(pids))
+		for _, pid := range pids {
+			config.Processes = append(config.Processes, types.ProcessConfig{PID: pid, PollIntervalMs: *pollMS})
+		}
+	}
+	if err := logic.NormalizeConfig(&config); err != nil {
+		return types.Config{}, err
+	}
 	return config, nil
+}
+
+func parsePIDs(value string) ([]int, error) {
+	parts := strings.Split(value, ",")
+	pids := make([]int, 0, len(parts))
+	seen := make(map[int]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		pid, err := strconv.Atoi(part)
+		if err != nil || pid <= 0 {
+			return nil, fmt.Errorf("invalid pid: %s", part)
+		}
+		if _, ok := seen[pid]; ok {
+			return nil, fmt.Errorf("duplicate pid: %d", pid)
+		}
+		seen[pid] = struct{}{}
+		pids = append(pids, pid)
+	}
+	if len(pids) == 0 {
+		return nil, fmt.Errorf("-pid requires at least one pid")
+	}
+	return pids, nil
 }

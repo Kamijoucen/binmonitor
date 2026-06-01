@@ -7,12 +7,12 @@ import (
 )
 
 func TestEventFilterComponentShouldWatchConfiguredEvents(t *testing.T) {
-	filter, err := NewEventFilterComponent([]string{"create", "modify", "delete", "read"})
+	filter, err := NewEventFilterComponent([]string{"create", "modify", "delete", "read", "open", "process_close"})
 	if err != nil {
 		t.Fatalf("NewEventFilterComponent() error = %v", err)
 	}
 
-	for _, op := range []types.FileOp{types.OpCreate, types.OpWrite, types.OpRemove, types.OpRename, types.OpRead} {
+	for _, op := range []types.FileOp{types.OpCreate, types.OpWrite, types.OpRemove, types.OpRename, types.OpRead, types.OpOpen, types.OpClose} {
 		if !filter.ShouldWatch(op) {
 			t.Fatalf("ShouldWatch(%v) = false, want true", op)
 		}
