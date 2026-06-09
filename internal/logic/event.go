@@ -4,11 +4,37 @@ import (
 	"fmt"
 	"os"
 
-	"binmonitor/internal/appctx"
 	"binmonitor/internal/types"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+// ─── 能力接口（由 Logic 自身定义，由 Component 实现） ───
+
+// FileStateTracker 定义跟踪文件大小的能力。
+type FileStateTracker interface {
+	GetSize(path string) (int64, bool)
+	SetSize(path string, size int64)
+	Remove(path string)
+}
+
+// DirectoryWatcher 定义管理目录监听的能力。
+type DirectoryWatcher interface {
+	IsWatched(path string) bool
+	RemovePath(path string) error
+	AddPath(path string) error
+}
+
+// EventTypeFilter 定义过滤文件操作类型的能力。
+type EventTypeFilter interface {
+	ShouldWatch(op types.FileOp) bool
+}
+
+// ReadDirectoryWatcher 定义管理读取监听目录的能力。
+type ReadDirectoryWatcher interface {
+	AddPath(path string) error
+	RemovePath(path string) error
+}
 
 // EventRecord 承载处理文件事件的结果。
 type EventRecord struct {
@@ -43,31 +69,30 @@ func TranslateEvent(ev fsnotify.Event) *types.FileEvent {
 }
 
 // ProcessEvent 处理文件事件并返回用于输出的 EventRecord。
-// 可能通过 appCtx 产生副作用（状态与监听器更新）。
+// 副作用（状态更新与监听器管理）通过注入的接口实例完成。
 // 返回 nil 表示无需打印记录。
-func ProcessEvent(appCtx *appctx.AppCtx, event types.FileEvent) *EventRecord {
+func ProcessEvent(state FileStateTracker, ignore PathIgnorer, watcher DirectoryWatcher, eventFilter EventTypeFilter, readWatcher ReadDirectoryWatcher, event types.FileEvent) *EventRecord {
 	if event.Op == types.OpOpen || event.Op == types.OpClose {
-		return processProcessEvent(appCtx, event)
+		return processProcessEvent(eventFilter, event)
 	}
 
-	state := appCtx.State()
-	if appCtx.Ignore().ShouldIgnore(event.Path) {
-		if (event.Op == types.OpRemove || event.Op == types.OpRename) && appCtx.Watcher() != nil && appCtx.Watcher().IsWatched(event.Path) {
-			_ = appCtx.Watcher().RemovePath(event.Path)
+	if ignore.ShouldIgnore(event.Path) {
+		if (event.Op == types.OpRemove || event.Op == types.OpRename) && watcher != nil && watcher.IsWatched(event.Path) {
+			_ = watcher.RemovePath(event.Path)
 		}
 		return nil
 	}
-	shouldOutput := appCtx.EventFilter().ShouldWatch(event.Op)
+	shouldOutput := eventFilter.ShouldWatch(event.Op)
 
 	switch event.Op {
 	case types.OpCreate:
 		// 如果创建了新目录，确保对其进行监听并跳过记录。
 		if info, err := os.Stat(event.Path); err == nil && info.IsDir() {
-			if appCtx.Watcher() != nil {
-				_ = appCtx.Watcher().AddPath(event.Path)
+			if watcher != nil {
+				_ = watcher.AddPath(event.Path)
 			}
-			if appCtx.ReadWatcher() != nil {
-				_ = appCtx.ReadWatcher().AddPath(event.Path)
+			if readWatcher != nil {
+				_ = readWatcher.AddPath(event.Path)
 			}
 			return nil
 		}
@@ -96,11 +121,11 @@ func ProcessEvent(appCtx *appctx.AppCtx, event types.FileEvent) *EventRecord {
 		}
 
 		// 如果目录被移除，停止监听它。
-		if appCtx.Watcher() != nil && appCtx.Watcher().IsWatched(event.Path) {
-			_ = appCtx.Watcher().RemovePath(event.Path)
+		if watcher != nil && watcher.IsWatched(event.Path) {
+			_ = watcher.RemovePath(event.Path)
 		}
-		if appCtx.ReadWatcher() != nil {
-			_ = appCtx.ReadWatcher().RemovePath(event.Path)
+		if readWatcher != nil {
+			_ = readWatcher.RemovePath(event.Path)
 		}
 		if !shouldOutput {
 			return nil
@@ -122,8 +147,8 @@ func ProcessEvent(appCtx *appctx.AppCtx, event types.FileEvent) *EventRecord {
 	return nil
 }
 
-func processProcessEvent(appCtx *appctx.AppCtx, event types.FileEvent) *EventRecord {
-	if !appCtx.EventFilter().ShouldWatch(event.Op) {
+func processProcessEvent(eventFilter EventTypeFilter, event types.FileEvent) *EventRecord {
+	if !eventFilter.ShouldWatch(event.Op) {
 		return nil
 	}
 	opName := "OPEN"
@@ -152,6 +177,20 @@ func getFileSize(path string) int64 {
 		return 0
 	}
 	return info.Size()
+}
+
+// ProcessNetEvent 处理网络连接事件并返回用于输出的 EventRecord。
+func ProcessNetEvent(eventFilter EventTypeFilter, event types.NetEvent) *EventRecord {
+	_ = eventFilter // 保持接口一致，暂不通过 EventFilter 过滤网络事件
+
+	return &EventRecord{
+		Op:             event.Op.String(),
+		Path:           event.ConnectionString(),
+		PID:            event.PID,
+		FD:             event.FD,
+		ProcessName:    event.ProcessName,
+		HasProcessMeta: true,
+	}
 }
 
 // HumanReadableSize 将字节数转换为人类可读的字符串。

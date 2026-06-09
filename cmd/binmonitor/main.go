@@ -55,11 +55,12 @@ func main() {
 	}
 	stateComp := component.NewStateComponent()
 	ignoreComp := component.NewIgnoreComponent(config.Root, config.Ignore)
-	eventFilterComp, err := component.NewEventFilterComponent(config.Events)
+	eventOps, err := logic.ResolveAllEventOps(config.Events)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "create event filter: %v\n", err)
+		fmt.Fprintf(os.Stderr, "resolve event ops: %v\n", err)
 		os.Exit(1)
 	}
+	eventFilterComp := component.NewEventFilterComponent(eventOps)
 	var readWatcherComp *component.ReadWatcherComponent
 	if config.Mode == types.ModeDirectory && eventFilterComp.ShouldWatch(types.OpRead) {
 		readWatcherComp, err = component.NewReadWatcherComponent()
@@ -76,6 +77,14 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	var netWatcherComp *component.NetWatcherComponent
+	if config.Mode == types.ModeNetwork {
+		netWatcherComp, err = component.NewNetWatcherComponent(*config.NetMonitor)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create net watcher: %v\n", err)
+			os.Exit(1)
+		}
+	}
 	var logWriterComp *component.LogWriterComponent
 	if config.Log {
 		logWriterComp, err = component.NewLogWriterComponent("binmonitor.log")
@@ -89,7 +98,7 @@ func main() {
 	if config.DedupLog {
 		dedupStatsComp = component.NewDedupStatsComponent()
 	}
-	appCtx := appctx.NewAppCtx(watcherComp, stateComp, ignoreComp, eventFilterComp, readWatcherComp, processWatcherComp, logWriterComp, dedupStatsComp)
+	appCtx := appctx.NewAppCtx(watcherComp, stateComp, ignoreComp, eventFilterComp, readWatcherComp, processWatcherComp, netWatcherComp, logWriterComp, dedupStatsComp)
 
 	monitorSvc := service.NewMonitorService(appCtx, config)
 	if err := monitorSvc.Start(); err != nil {
@@ -104,6 +113,8 @@ func loadConfig(args []string) (types.Config, error) {
 	configPath := flagSet.String("config", defaultConfigPath, "config file path")
 	pidValue := flagSet.String("pid", "", "comma-separated process IDs to monitor")
 	pollMS := flagSet.Int("poll-ms", 0, "process fd polling interval in milliseconds")
+	dnsFlag := flagSet.Bool("dns", false, "enable DNS query detection (UDP port 53)")
+	socks5Ports := flagSet.String("socks5-ports", "", "comma-separated SOCKS5 proxy ports (default: 1080,10800,9050)")
 	if err := flagSet.Parse(args); err != nil {
 		return types.Config{}, err
 	}
@@ -145,12 +156,46 @@ func loadConfig(args []string) (types.Config, error) {
 		if err != nil {
 			return types.Config{}, err
 		}
-		config.Mode = types.ModeProcess
-		config.Process = nil
-		config.ProcessPollIntervalMs = *pollMS
-		config.Processes = make([]types.ProcessConfig, 0, len(pids))
-		for _, pid := range pids {
-			config.Processes = append(config.Processes, types.ProcessConfig{PID: pid, PollIntervalMs: *pollMS})
+		// 如果指定了 --dns，切换到网络模式
+		if *dnsFlag {
+			if len(pids) > 1 {
+				return types.Config{}, fmt.Errorf("network mode only supports a single pid")
+			}
+			config.Mode = types.ModeNetwork
+			config.NetMonitor = &types.NetMonitorConfig{
+				PID:            pids[0],
+				PollIntervalMs: *pollMS,
+				DNSTrace:       true,
+				Socks5Ports:    types.DefaultSocks5Ports,
+			}
+			if strings.TrimSpace(*socks5Ports) != "" {
+				ports, err := parsePorts(*socks5Ports)
+				if err != nil {
+					return types.Config{}, fmt.Errorf("invalid socks5 ports: %w", err)
+				}
+				config.NetMonitor.Socks5Ports = ports
+			}
+		} else {
+			config.Mode = types.ModeProcess
+			config.Process = nil
+			config.ProcessPollIntervalMs = *pollMS
+			config.Processes = make([]types.ProcessConfig, 0, len(pids))
+			for _, pid := range pids {
+				config.Processes = append(config.Processes, types.ProcessConfig{PID: pid, PollIntervalMs: *pollMS})
+			}
+		}
+	}
+	// 如果配置文件中已设置为 network 模式，补齐默认值
+	if config.Mode == types.ModeNetwork && config.NetMonitor != nil {
+		if *dnsFlag {
+			config.NetMonitor.DNSTrace = true
+		}
+		if strings.TrimSpace(*socks5Ports) != "" && config.NetMonitor.Socks5Ports == nil {
+			ports, err := parsePorts(*socks5Ports)
+			if err != nil {
+				return types.Config{}, fmt.Errorf("invalid socks5 ports: %w", err)
+			}
+			config.NetMonitor.Socks5Ports = ports
 		}
 	}
 	if err := logic.NormalizeConfig(&config); err != nil {
@@ -182,4 +227,21 @@ func parsePIDs(value string) ([]int, error) {
 		return nil, fmt.Errorf("-pid requires at least one pid")
 	}
 	return pids, nil
+}
+
+func parsePorts(value string) ([]int, error) {
+	parts := strings.Split(value, ",")
+	ports := make([]int, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		port, err := strconv.Atoi(part)
+		if err != nil || port <= 0 || port > 65535 {
+			return nil, fmt.Errorf("invalid port: %s", part)
+		}
+		ports = append(ports, port)
+	}
+	return ports, nil
 }

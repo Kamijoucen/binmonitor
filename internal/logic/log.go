@@ -3,13 +3,15 @@ package logic
 import (
 	"fmt"
 	"time"
-
-	"binmonitor/internal/appctx"
 )
 
+// LogLineWriter 定义写入一行日志的能力。由 Component 实现。
+type LogLineWriter interface {
+	WriteLine(line string) error
+}
+
 // LogEvent 将事件记录格式化为日志行并写入日志文件（如果已启用）。
-func LogEvent(appCtx *appctx.AppCtx, record *EventRecord) error {
-	lw := appCtx.LogWriter()
+func LogEvent(lw LogLineWriter, record *EventRecord) error {
 	if lw == nil {
 		return nil
 	}
@@ -23,6 +25,12 @@ func FormatEventRecord(record *EventRecord, timestamp string) string {
 		namePart := ""
 		if record.ProcessName != "" {
 			namePart = fmt.Sprintf(" name=%s", record.ProcessName)
+		}
+		// 网络事件：不显示文件大小
+		if isNetworkOp(record.Op) {
+			return fmt.Sprintf("%s %s pid=%d fd=%d%s %s",
+				timestamp, record.Op, record.PID, record.FD, namePart, record.Path,
+			)
 		}
 		return fmt.Sprintf("%s %s pid=%d fd=%d%s %s %s",
 			timestamp, record.Op, record.PID, record.FD, namePart, record.Path,
@@ -39,6 +47,15 @@ func FormatEventRecord(record *EventRecord, timestamp string) string {
 	)
 }
 
+// isNetworkOp 判断操作类型是否为网络事件。
+func isNetworkOp(op string) bool {
+	switch op {
+	case "TCP_CONNECT", "TCP_CLOSE", "TCP_STATE", "UDP_CONNECT", "DNS_QUERY", "SOCKS5_CONNECT":
+		return true
+	}
+	return false
+}
+
 // DedupRecordPath 返回用于去重日志的路径键。
 func DedupRecordPath(record *EventRecord) string {
 	if record.HasProcessMeta {
@@ -51,8 +68,7 @@ func DedupRecordPath(record *EventRecord) string {
 }
 
 // LogError 将错误信息写入日志文件（如果已启用）。
-func LogError(appCtx *appctx.AppCtx, format string, args ...interface{}) error {
-	lw := appCtx.LogWriter()
+func LogError(lw LogLineWriter, format string, args ...interface{}) error {
 	if lw == nil {
 		return nil
 	}

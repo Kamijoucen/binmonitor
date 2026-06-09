@@ -1,12 +1,12 @@
-package logic
+package logic_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"binmonitor/internal/appctx"
 	"binmonitor/internal/component"
+	"binmonitor/internal/logic"
 	"binmonitor/internal/types"
 )
 
@@ -34,13 +34,8 @@ func TestInitStateFromPathSkipsIgnoredFilesAndDirs(t *testing.T) {
 
 	state := component.NewStateComponent()
 	ignore := component.NewIgnoreComponent(root, []string{"tmp/cache.db", "logs"})
-	eventFilter, err := component.NewEventFilterComponent(DefaultConfig().Events)
-	if err != nil {
-		t.Fatalf("NewEventFilterComponent() error = %v", err)
-	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil, nil)
 
-	if err := InitStateFromPath(applicationContext, root); err != nil {
+	if err := logic.InitStateFromPath(state, ignore, root); err != nil {
 		t.Fatalf("InitStateFromPath() error = %v", err)
 	}
 	if _, ok := state.GetSize(keepPath); !ok {
@@ -66,13 +61,13 @@ func TestProcessEventSkipsIgnoredPath(t *testing.T) {
 
 	state := component.NewStateComponent()
 	ignore := component.NewIgnoreComponent(root, []string{"logs"})
-	eventFilter, err := component.NewEventFilterComponent(DefaultConfig().Events)
+	ops, err := logic.ResolveAllEventOps(logic.DefaultConfig().Events)
 	if err != nil {
-		t.Fatalf("NewEventFilterComponent() error = %v", err)
+		t.Fatalf("ResolveAllEventOps() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil, nil)
+	eventFilter := component.NewEventFilterComponent(ops)
 
-	if record := ProcessEvent(applicationContext, types.FileEvent{Path: ignoredPath, Op: types.OpWrite}); record != nil {
+	if record := logic.ProcessEvent(state, ignore, nil, eventFilter, nil, types.FileEvent{Path: ignoredPath, Op: types.OpWrite}); record != nil {
 		t.Fatalf("ProcessEvent() = %#v, want nil", record)
 	}
 	if _, ok := state.GetSize(ignoredPath); ok {
@@ -89,13 +84,13 @@ func TestProcessEventSkipsDisabledEventOutputButUpdatesState(t *testing.T) {
 
 	state := component.NewStateComponent()
 	ignore := component.NewIgnoreComponent(root, nil)
-	eventFilter, err := component.NewEventFilterComponent([]string{"remove"})
+	ops, err := logic.ResolveAllEventOps([]string{"remove"})
 	if err != nil {
-		t.Fatalf("NewEventFilterComponent() error = %v", err)
+		t.Fatalf("ResolveAllEventOps() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil, nil)
+	eventFilter := component.NewEventFilterComponent(ops)
 
-	if record := ProcessEvent(applicationContext, types.FileEvent{Path: path, Op: types.OpWrite}); record != nil {
+	if record := logic.ProcessEvent(state, ignore, nil, eventFilter, nil, types.FileEvent{Path: path, Op: types.OpWrite}); record != nil {
 		t.Fatalf("ProcessEvent() = %#v, want nil", record)
 	}
 	if size, ok := state.GetSize(path); !ok || size != 5 {
@@ -112,13 +107,13 @@ func TestProcessEventReturnsReadRecordWhenEnabled(t *testing.T) {
 
 	state := component.NewStateComponent()
 	ignore := component.NewIgnoreComponent(root, nil)
-	eventFilter, err := component.NewEventFilterComponent([]string{"read"})
+	ops, err := logic.ResolveAllEventOps([]string{"read"})
 	if err != nil {
-		t.Fatalf("NewEventFilterComponent() error = %v", err)
+		t.Fatalf("ResolveAllEventOps() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil, nil)
+	eventFilter := component.NewEventFilterComponent(ops)
 
-	record := ProcessEvent(applicationContext, types.FileEvent{Path: path, Op: types.OpRead})
+	record := logic.ProcessEvent(state, ignore, nil, eventFilter, nil, types.FileEvent{Path: path, Op: types.OpRead})
 	if record == nil {
 		t.Fatal("ProcessEvent() = nil, want READ record")
 	}
@@ -136,13 +131,13 @@ func TestProcessEventReturnsOpenRecordWithProcessMetadata(t *testing.T) {
 
 	state := component.NewStateComponent()
 	ignore := component.NewIgnoreComponent(root, []string{"file.txt"})
-	eventFilter, err := component.NewEventFilterComponent([]string{"open"})
+	ops, err := logic.ResolveAllEventOps([]string{"open"})
 	if err != nil {
-		t.Fatalf("NewEventFilterComponent() error = %v", err)
+		t.Fatalf("ResolveAllEventOps() error = %v", err)
 	}
-	applicationContext := appctx.NewAppCtx(nil, state, ignore, eventFilter, nil, nil, nil, nil)
+	eventFilter := component.NewEventFilterComponent(ops)
 
-	record := ProcessEvent(applicationContext, types.FileEvent{Path: path, Op: types.OpOpen, PID: 123, FD: 7, ProcessName: "worker"})
+	record := logic.ProcessEvent(state, ignore, nil, eventFilter, nil, types.FileEvent{Path: path, Op: types.OpOpen, PID: 123, FD: 7, ProcessName: "worker"})
 	if record == nil {
 		t.Fatal("ProcessEvent() = nil, want OPEN record")
 	}
@@ -153,12 +148,12 @@ func TestProcessEventReturnsOpenRecordWithProcessMetadata(t *testing.T) {
 		t.Fatalf("record sizes = %d/%d, want 5/5", record.OldSize, record.NewSize)
 	}
 
-	line := FormatEventRecord(record, "2026-06-01 12:00:00")
+	line := logic.FormatEventRecord(record, "2026-06-01 12:00:00")
 	wantLine := "2026-06-01 12:00:00 OPEN pid=123 fd=7 name=worker " + path + " 5B"
 	if line != wantLine {
 		t.Fatalf("FormatEventRecord() = %q, want %q", line, wantLine)
 	}
-	if got := DedupRecordPath(record); got != "pid=123 name=worker "+path {
+	if got := logic.DedupRecordPath(record); got != "pid=123 name=worker "+path {
 		t.Fatalf("DedupRecordPath() = %q", got)
 	}
 }

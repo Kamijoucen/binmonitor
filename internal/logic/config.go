@@ -69,6 +69,10 @@ func NormalizeConfig(config *types.Config) error {
 		if err := normalizeProcessConfig(config); err != nil {
 			return err
 		}
+	case types.ModeNetwork:
+		if err := normalizeNetworkConfig(config); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unknown mode: %s", config.Mode)
 	}
@@ -112,6 +116,25 @@ func normalizeProcessConfig(config *types.Config) error {
 		}
 	}
 	config.Processes = processes
+	return nil
+}
+
+func normalizeNetworkConfig(config *types.Config) error {
+	if config.NetMonitor == nil {
+		return fmt.Errorf("network mode requires netMonitor config")
+	}
+	if config.NetMonitor.PID <= 0 {
+		return fmt.Errorf("network mode requires a valid pid in netMonitor")
+	}
+	if config.NetMonitor.PollIntervalMs < 0 {
+		return fmt.Errorf("network poll interval must be greater than or equal to 0")
+	}
+	if config.NetMonitor.PollIntervalMs <= 0 {
+		config.NetMonitor.PollIntervalMs = types.DefaultNetworkPollIntervalMs
+	}
+	if config.NetMonitor.Socks5Ports == nil {
+		config.NetMonitor.Socks5Ports = types.DefaultSocks5Ports
+	}
 	return nil
 }
 
